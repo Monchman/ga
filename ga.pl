@@ -8,13 +8,13 @@ print "GA - START\n";
 # Parameters
 my $iterationnumber=150;		# number of iterations
 my $crossoverprob=0.3;			# crossover probability
-my $mutationprob=0.08;			# mutation probability
+my $mutationprob=0.005;			# mutation probability
 my $fitnesspow=1;			# pow value for fitness formula
 my $indnumber=25;			# number of individuals (solutions)
 my $holdoutval=0.3;			# percentage of inputs that will be used for cross validation
 my $infile="./input.txt";		# indicators results input file
 my $avgenvelope=0.3333;			# prediction_avg envelope
-my $initconst=0.05;			# initialize: chance of bit=1
+my $initconst=0.25;			# initialize: chance of bit=1
 
 # Variables
 my $linecount=-1;
@@ -38,6 +38,7 @@ my @loadedresults;
 use Time::HiRes qw( time );
 use POSIX qw/ceil/;
 use POSIX qw/floor/;
+use strict;
 
 
 #system(clear);
@@ -83,19 +84,16 @@ sub printgaconditions {
 
 # populates a matrix with the indicator results calculated in the spreadsheet
 sub popresults {
+	my $line = 0;
 
 	open(INFILE,$infile) or die("Cant open file:$!");
 	while (<INFILE>){
-
 	        $line=$_;
 		chomp($line);
 		@fields = split ',', $line;
-#		print "fields: @fields\n";
 
 		$linecount=$linecount+1;
-#		print "linecount: $linecount\n";
 	        for my $colcount (0..scalar(@fields)-1){
-#			print "colcount: $colcount\n";
 			$loadedresults[$linecount][$colcount] = @fields[$colcount];
 		}
 	}
@@ -103,11 +101,9 @@ sub popresults {
 
 	# Defining individual size based on input file
 	$indsize = scalar(@fields)-1;
-#	print "indsize= $indsize\n";
 
 	# Defining loaded results size
 	$loadedresultssize = scalar(@loadedresults);
-
 }
 
 # Holdout method to divide the loadedresults matrix in two parts
@@ -118,18 +114,15 @@ sub holdout {
 	for my $row (0..scalar(@loadedresults)-1){
 		$myrand=rand();
 		if ( $myrand gt $holdoutval ){
-#			print "trainingrow :$trainingrow\n";
 			$training[$trainingrow]=$loadedresults[$row];
 			$trainingrow=$trainingrow+1;
 		}
 		else {
-#			print "crossvalrow :$crossvalrow\n";
 			$crossresults[$crossvalrow]=$loadedresults[$row];
 			$crossvalrow=$crossvalrow+1;
 		}
 	}
 	# Defining training data set size
-
 	$trainingsize = scalar(@training);
 	# Defining cross validation data set size
 	$crossresultssize = scalar(@crossresults);
@@ -179,16 +172,13 @@ sub printarray {
 
 	for my $indn (0..scalar(@array)-1){
 		$sum=0.0;
-#		print "Line $indn: ";
 		print "\tLine\t$indn:\t";
 		for my $column (0..scalar(@{$array[0]})-1){
-#			print "$array[$indn][$column] ";
 			if ( $column >= $indsize ) {
 				print "  | ";
 			}
 			printf "%3.9s",$array[$indn][$column] ;
 		}
-#		print "| Sum: $sum\n";
 		print "\n";
 	}
 	print "\n";
@@ -205,7 +195,6 @@ sub initialize {
 		for my $column (0..$indsize-1){
 
 			my $myrand=rand();
-#			if ( $myrand gt 0.15 ){
 			if ( $myrand gt $const ){
 				$value=1;
 			}
@@ -251,13 +240,9 @@ sub fitnessadj {
 sub usedindnum {
 	my $indrow = $_[0];
 	my $numusedind = 0;
-#	print "indrow: $indrow\n";
 	for my $col (0..($indsize-1)){
-#		print "col: $col";
                 $numusedind = $numusedind + $ind[$indrow][$col];
         }
-#	print " $numusedind\n";
-#	print "Indicators used: $numusedind\n\n";
 	return $numusedind;
 }
 
@@ -270,24 +255,19 @@ sub prediction_avg {
 	my $indrow = $_[2];
 
 	my $sum = 0;
+	my $avg = 0;
 	my $usedind = 0;
 	my $pred = 17;
-
-#	print "arrayrow: $arrayrow\n";
-#	print "indrow: $indrow\n";
 
 	# Sum of used indicators results
 	for my $col (0..($indsize-1)){
 		$sum=$sum + ( $ind[$indrow][$col] * $array->[$arrayrow][$col] );
 	}
-#	print "sum: $sum\n";
 	$usedind = usedindnum($indrow);
-#	print "usedind: $usedind\n";
 	if ( $usedind == 0 ) {
 		$pred = 2;
 	} else {
 		$avg = $sum / $usedind;
-#		print "avg: $avg\n";
 
 		# Mutable envelope
 		$avgenvelope = 1 / $usedind;
@@ -302,14 +282,9 @@ sub prediction_avg {
 			}
 		}
 	}
-#	print "pred: $pred\n";
-#	print $pred;
-
-
-#	print "ind value: $ind[0][0]\n";
-#	$array->[1][0] = 42;
-	
+	return $pred;
 }
+
 # Fitness function AVG method
 sub calcfitness_avg {
 
@@ -323,84 +298,27 @@ sub calcfitness_avg {
 		$sum=0.00;
 		# For each training row...
 		for my $trow (0..(scalar(@training)-1)){
-#			print "training row: $trow\n";
 			# Calculate absolute error actual result and prediction
 			$myprediction = prediction_avg(\@training,$trow,$subject);
-#			print "ind: $subject training row: $trow prediction: $myprediction\n";
 			if ( $myprediction == 2 ) {
 				# If prediction == 2 (that happens when no indicators are selected)
 				# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
 				$sum = $trainingsize * 2;
-#				$error = $trainingsize;
-#				$sum = $error;
 				last;
 			} else {
-				$error = $training[$trow][-1] - prediction_avg(\@training,$trow,$subject);
+				$error = $training[$trow][-1] - $myprediction;
 				$sum = $sum + abs($error);
 	#			$sum = $sum * $sum; # Should I use this one?
 			}
 		}
 		$ind[$subject][$indsize] = $sum;
-#		print "fitness for subject $subject: $sum\n";
-#		if ( $myprediction == 2 ) {
-#			$ind[$subject][$indsize] = $sum * $indsize;
-#		} else {
-#			$ind[$subject][$indsize] = ($sum / sqrt(usedindnum($subject)));
-#		}
 	}
-#	print "\n";
-
 	$max=&fitnessadj;
 
-#	print ">>> Sorting array\n";
 	&sortarray();
 
 	return $max;
 }
-
-# Fitness function
-sub calcfitness2 {
-
-	my $sum;
-	my $sum2;
-	my $max;
-
-	# For each subject...
-	for my $row (0..scalar(@ind)-1){
-		$sum2=0.00;
-		$sumindicators=0.00;
-		# For each result line...
-		for my $col (0..($indsize-1)){
-			$sumindicators=$sumindicators + $ind[$row][$col];
-		}
-		for my $trow (0..(scalar(@training)-1)){
-#			print "training line: $trow\n";
-			$sum=0.00;
-			# Summation in n of (x_kn * y_mn) ### this is part of the fitness function
-			for my $col (0..($indsize-1)){
-				$sum = $sum + ( $training[$trow][$col] * $ind[$row][$col] );
-			}
-			# Difference between actual result and average of used indicators result ### this is also part of the fitness function
-			$sum = $training[$trow][-1] - ($sum / $sumindicators);
-#			$sum = $training[$trow][-1] - $sum;
-			# Summation in m of abs of variable sum
-			$sum2 = $sum2 + abs($sum);
-#			$sum2 = $sum2 + ($sum * $sum); ### Should I use this one?
-		}
-#		print "fitness for subject $row: $sum2\n";
-		$ind[$row][$indsize]=$sum2;
-#		print "total sum for ind $row: $sum2\n";
-	}
-#	print "\n";
-
-	$max=&fitnessadj;
-
-#	print ">>> Sorting array\n";
-	&sortarray();
-
-	return $max;
-}
-
 
 #Sort ind array by its last field (adjusted fitness)
 sub sortarray {
@@ -420,21 +338,17 @@ sub cmpfunc {
 sub selection {
 
 	my $max=$_[0];
-#	print "diffsum: $max\n";
 	my $sum;
 
 	# loop (scalar(population)-1) times to get (same number - 1) of subjects for next generation
 	for my $count (0..scalar(@ind)-2){
 		my $myrand=rand() * $max;
 		my $myrand=int($myrand + 0.5);
-#		print "# $count - rand: $myrand\n";
 
 		$sum=0;
 		# for each subject...
 		for my $row (0..scalar(@ind)-1){
-#			print "internal: $sum -- " . ($ind[$row][($indsize+1)] + $sum) . "\n";
 			if ( ($myrand >= $sum ) and ($myrand <= ($ind[$row][($indsize+1)] + $sum) ) ) {
-#				print "Choice $count: # $row\n";
 				for my $col (0..($indsize+1)){
 					$indaux[$count][$col]=$ind[$row][$col];
 				}
@@ -451,8 +365,6 @@ sub selection {
 	}
 
 	@ind=@indaux;
-#	print "\n";
-#	print ">>> Sorting array\n";
 	&sortarray();
 }
 
@@ -462,6 +374,8 @@ sub crossover {
 	my $pairs=0;
 	my $aux;
 	my $myrand=0;
+	my $first=0;
+	my $second=0;
 	my $addone=0;
 	my $remainder=0;
 	$pairs=int($indnumber/2);
@@ -469,32 +383,23 @@ sub crossover {
 	# ie., in case of 5 individuals, add 50% chances of crossing over paiasr (2-3) and (4-5)
 	# without the code below, only pairs (1-2) and (3-4) would have a chance of crossing over
 	$remainder=$indnumber%2;
-#	print "remainder: $remainder\n";
 	if ( $remainder ){
 		$myrand=rand();
 		if ( $myrand > 0.5 ){
 			$addone=1;
 		}
-#		print "addone: $addone\n";
 	}
-#	print "crossoverprob: $crossoverprob\n";
-#	print "# of pairs: $pairs\n";
 	# For possible pairs loop...
 	for my $count (1..$pairs) {
-#		print "count: $count\n";
 
 		# will crossover happen?
 		$myrand=rand();
-#		print "rand: $myrand\n";
 		if ( $myrand <= $crossoverprob ) {
 
 			$first=(2*$count)-1+$addone;
 			$second=(2*$count)-2+$addone;
 			my $myrandpos=floor(rand()*($indsize));
-#			my $myrandpos=ceil(rand()*($indsize-1));
-#			my $myrandpos=ceil(rand()*4);
 			print "\tCrossover between $first and $second at position $myrandpos\n";
-#			print "myrandpos: $myrandpos\n";
 
 			# From position pos till the last data position (scalar-3) swap values
 			for my $pos ($myrandpos..($indsize-1)) {
@@ -511,22 +416,15 @@ sub crossover {
 sub mutation {
 
 	my $myrand;
-	my $prob = $mutationprob / ($indnumber * $indsize );
 
 	# For each subject...
 	for my $row (0..scalar(@ind)-1){
-#		print "row: " . $row . "\n"; 
 		# For each column...
 		for my $col (0..($indsize-1)){
-#			print "col: " . $col . "\n"; 
 			$myrand=rand();
-#			print "myrand: " . $myrand . "\n"; 
-			if ( $myrand <= $prob ) {
+			if ( $myrand <= $mutationprob ) {
 				print "\tMutation in individual $row at position $col\n";
-#				print "before: " . $ind[$row][$col] . "\n";
-#				print "cell + 1: " . ($ind[$row][$col] + 1) . "\n";
 				$ind[$row][$col]=(($ind[$row][$col] + 1) & 1);
-#				print "after: " . $ind[$row][$col] . "\n";
 			}
 		}
 	}
@@ -543,37 +441,28 @@ sub crossvalidation {
 	my $crosspercentage=0;
 	my $rights=0;
 	
-#	print "\n>>> Cross validation results <<<\n";
-
 	# The Chosen One
 	print "\tBest individual:";
 	for my $col (0..($indsize-1)){
 		printf "%s", $ind[-1][$col];
-#		print "$ind[scalar(@ind)-1][$col] ";
         }
-#	print "\n";
 
 	# Calculating the sum of the columns of the best individual, ie., number of technical indicators chosen
 	$chosenindnum=usedindnum(-1);
-#	print "\t# of chosen indicators: $chosenindnum/$indsize\n";
 	print "\t# indicators: $chosenindnum/$indsize";
 
 	# Counts how many results are reproduced by the best individual
 	# For each cross results record
 	for my $crow (0..($crossresultssize-1)) {
-#		print "crow: $crow\n";
 		$prediction = prediction_avg(\@crossresults,$crow,-1);
-#		print "Prediction: $prediction  Result: $crossresults[$crow][$indsize]\n";
 		if ( $prediction == $crossresults[$crow][$indsize] ){
 			$rights = $rights + 1;
 		}
 	}
 
-#	print "crossresults scalar: $crossresultssize\n";
 	$crosspercentage = $rights / $crossresultssize;
 	$crosspercentage = $crosspercentage * 100;
 	printf "\tCorrect predictions $rights/$crossresultssize (or %.2f%)\n",$crosspercentage;
-#	printf "\tCross validation: Cases predicted correctly $rights/$crossresultssize (or %.2f%)\n",$crosspercentage;
 	print "\n\n";
 }
 
