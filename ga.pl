@@ -1,5 +1,13 @@
 #!/usr/bin/perl
 
+use strict;
+use Time::HiRes qw( time );
+use POSIX qw/ceil floor/;
+use threads;
+use threads::shared;
+use Thread qw(async);
+use List::Util qw[min max sum];
+
 my $start;
 $start = time();
 
@@ -33,12 +41,8 @@ my @fields;
 my @crossresults;
 my @crossval;
 my @loadedresults;
-
-use Time::HiRes qw( time );
-use POSIX qw/ceil/;
-use POSIX qw/floor/;
-use strict;
-
+my $MAX_THREADS = 4;
+my $DEBUG_MODE = 0;
 
 #system(clear);
 
@@ -83,7 +87,7 @@ sub printgaconditions {
 
 sub printholdoutconditions {
 	print "Training data set size:\t\t$trainingsize\n";
-        print "Cross validation data set size:\t$crossresultssize\n";
+		print "Cross validation data set size:\t$crossresultssize\n";
 }
 
 # populates a matrix with the indicator results calculated in the spreadsheet
@@ -92,12 +96,11 @@ sub popresults {
 
 	open(INFILE,$infile) or die("Cant open file:$!");
 	while (<INFILE>){
-	        $line=$_;
+		my $line=$_;
 		chomp($line);
 		@fields = split ',', $line;
-
 		$linecount=$linecount+1;
-	        for my $colcount (0..scalar(@fields)-1){
+			for my $colcount (0..scalar(@fields)-1){
 			$loadedresults[$linecount][$colcount] = @fields[$colcount];
 		}
 	}
@@ -125,12 +128,12 @@ sub holdout {
 		}
 	}
 	for my $row (0..scalar(@loadedresults)-1){
-                $myrand=rand();
-                if ( $myrand gt $holdoutval ){
+				$myrand=rand();
+				if ( $myrand gt $holdoutval ){
 			$crossresults[$crossvalrow]=$loadedresults[$row];
 			$crossvalrow=$crossvalrow+1;
-                }
-        }
+				}
+		}
 	# Defining training data set size
 	$trainingsize = scalar(@training);
 	# Defining cross validation data set size
@@ -184,15 +187,14 @@ sub printarray {
 		print "\tLine\t$indn:\t";
 		for my $column (0..scalar(@{$array[0]})-1){
 			if ( $column >= $indsize ) {
-				print "  | ";
+				print " | ";
 			}
-			printf "%3.9s",$array[$indn][$column] ;
+			printf "%s",$array[$indn][$column];
 		}
 		print "\n";
 	}
 	print "\n";
 }
-
 # Initialize subjects
 sub initialize {
 	print ">>> Initializing individuals\n";
@@ -248,11 +250,11 @@ sub fitnessadj {
 # Returns number of used indicators by individual which row is passed as first parameter
 sub usedindnum {
 	my $indrow = $_[0];
-	my $numusedind = 0;
-	for my $col (0..($indsize-1)){
-                $numusedind = $numusedind + $ind[$indrow][$col];
-        }
-	return $numusedind;
+	# my $numusedind = 0;
+	# for my $col (0..($indsize-1)){
+	# 	$numusedind += $ind[$indrow][$col];
+	# }
+	return sum(@{$ind[$indrow]}[0..$indsize-1]);
 }
 
 # Prediction function for a given indicator and result row. AVG method.
@@ -270,7 +272,7 @@ sub prediction_avg {
 
 	# Sum of used indicators results
 	for my $col (0..($indsize-1)){
-		$sum=$sum + ( $ind[$indrow][$col] * $array->[$arrayrow][$col] );
+		$sum += ( $ind[$indrow][$col] * $array->[$arrayrow][$col] );
 	}
 	$usedind = usedindnum($indrow);
 	if ( $usedind == 0 ) {
@@ -279,7 +281,8 @@ sub prediction_avg {
 		$avg = $sum / $usedind;
 
 		# Mutable envelope
-		$avgenvelope = 1 / $usedind;
+		#$avgenvelope = 1 / $usedind;
+		$avgenvelope = ceil($usedind / 2.0) / $usedind;
 
 		if (( $avg >= $avgenvelope ) and ( $avg <= 1 )) {
 			$pred = 1;
@@ -294,94 +297,183 @@ sub prediction_avg {
 	return $pred;
 }
 
-# Fitness function AVG method
-sub calcfitness_avg {
-
-	my $sum;
-	my $error;
-	my $max;
+sub theFitness_avg {
+	my $subject = shift;
+	my $sum = 0.00;
 	my $myprediction;
+	my $error;
+
+	# For each training row...
+	for my $trow (0..(scalar(@training)-1)){
+		# Calculate absolute error actual result and prediction
+		$myprediction = prediction_avg(\@training, $trow, $subject);
+		if ( $myprediction == 2 ) {
+			# If prediction == 2 (that happens when no indicators are selected)
+			# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
+			$sum = $trainingsize * 2;
+			last;
+		} else {
+			$error = $training[$trow][-1] - $myprediction;
+			$sum = $sum + abs($error);
+			#$sum = $sum * $sum; # Should I use this one?
+		}
+	}
+	return $sum;
+}
+
+sub calcfitness_avg1 {
+	my $sum;
 
 	# For each subject...
 	for my $subject (0..scalar(@ind)-1){
-		$sum=0.00;
-		# For each training row...
-		for my $trow (0..(scalar(@training)-1)){
-			# Calculate absolute error actual result and prediction
-			$myprediction = prediction_avg(\@training,$trow,$subject);
-			if ( $myprediction == 2 ) {
-				# If prediction == 2 (that happens when no indicators are selected)
-				# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
-				$sum = $trainingsize * 2;
-				last;
-			} else {
-				$error = $training[$trow][-1] - $myprediction;
-				$sum = $sum + abs($error);
-	#			$sum = $sum * $sum; # Should I use this one?
-			}
-		}
+		$sum = theFitness_avg($subject);
 		$ind[$subject][$indsize] = $sum;
 	}
-	$max=&fitnessadj;
 
+	my $max = &fitnessadj;
 	&sortarray();
 
 	return $max;
 }
 
+# Fitness function AVG method
+sub calcfitness_avg {
+	my $error;
+	my $max;
+	my $myprediction;
+
+	# For each subject...
+	##	for my $row (0..scalar(@ind)-1){
+	my $limit = scalar(@ind)-1;
+	my $chunk = min($limit, 1 + int($limit / $MAX_THREADS));
+	my $first = 0;
+	my @threadList = ();
+
+	my %theFit :shared;
+	%theFit = {};
+
+	while ($first < $limit) {
+		my $last = min($first + $chunk, $limit);
+		my $thd = async {
+			for my $subject ($first..$last) {
+				my $sum = theFitness_avg($subject);
+				{ lock(%theFit); $theFit{$subject} = $sum; }
+			}
+		};
+		push(@threadList, $thd);
+		$first = $last
+	}
+	map { $_->join(); } @threadList;
+	for my $subject (0..$limit){
+		unless (exists($theFit{$subject})) {
+			print "\t-> INVALID: $subject\n";
+			next;
+		}
+		$ind[$subject][$indsize] = $theFit{$subject};
+	}
+	$max = &fitnessadj;
+	&sortarray();
+	return $max;
+}
+
 #Sort ind array by its last field (adjusted fitness)
 sub sortarray {
-
 	my @array = sort cmpfunc @ind;
 	@ind=@array;
-
 }
 sub cmpfunc {
-	my $size;
-	$size=scalar(@{$ind[0]})-1;
-	return (($a->[$size] <=> $b->[$size]) or 
-		($a->[$size-1] <=> $b->[$size-1]));
+	# my $size;
+	# $size=scalar(@{$ind[0]})-1;
+	return (($a->[-1] <=> $b->[-1]) or
+		($a->[-2] <=> $b->[-2]));
 }
+
 
 # Select new population
 sub selection {
-
 	my $max=$_[0];
-	my $sum;
 	my $curfitadj = 0;
-	my @indaux;
+	my @indaux = ();
 
 	# loop ($indnumber-2) times to get (same number - 1) subjects for next generation
 	for my $count (0..$indnumber-2){
-		my $myrand=rand() * $max;
-
-		$sum=0;
+		my $myrand = rand() * $max;
+		my $sum = 0;
 		# for each subject...
 		for my $subject (0..$indnumber-1){
 			$curfitadj = $ind[$subject][($indsize+1)];
 			if ( ($myrand >= $sum ) and ($myrand <= ($curfitadj + $sum) ) ) {
-				for my $col (0..($indsize+1)){
-					$indaux[$count][$col]=$ind[$subject][$col];
-				}
-				# If found, skip the rest of the loop
-				last;
+				@{$indaux[$count]} = @{$ind[$subject]};
+				last;  # If found, skip the rest of the loop
 			}
-			$sum=$sum+$curfitadj;
+			$sum += $curfitadj;
 		}
 	}
+	# Best individual goes automatically to new population
+	@{$indaux[$indnumber-1]} = @{$ind[$indnumber-1]};
+	@ind = @indaux;
+	&sortarray();
+}
+
+
+# Select new population
+sub selection1 {
+	my $max=$_[0];
+	my $curfitadj = 0;
+
+map { print join('', @$_) . "\n"; } @ind;
+
+	# loop ($indnumber-2) times to get (same number - 1) subjects for next generation
+	##	for my $count (0..$indnumber-2){
+	my $limit = scalar(@ind)-1;
+	my $chunk = min($limit, 1 + int($limit / $MAX_THREADS));
+	my $first = 0;
+	my @threadList = ();
+
+	my @indaux :shared;
+	@indaux = ();
+
+	while ($first < $limit) {
+		my $last = min($first + $chunk, $limit);
+		my $thd = async {
+			for my $count ($first..($last - 1)) {
+				my $myrand = rand() * $max;
+				my $sum = 0;
+				# for each subject...
+				for my $subject (0..$indnumber-1){
+					$curfitadj = $ind[$subject][$indsize];
+					if ( ( $sum <= $myrand) and ($myrand <= ($curfitadj + $sum) ) ) {
+						{ lock(@indaux);  push(@indaux, $subject); }
+						last;  # If found, skip the rest of the loop
+					}
+					$sum += $curfitadj;
+				}
+			}
+		};
+		push(@threadList, $thd);
+		$first = $last;
+	}
+	map { $_->join(); } @threadList;
+
+	my @indNew = ();
+	foreach(@indaux) {
+		push(@indNew, $ind[$_]);
+	}
+	@ind = @indNew;
+
+print "#####\n";
+map { print join('', @$_) . "\n"; } @ind;
+
 
 	# Best individual goes automatically to new population
-	for my $col (0..($indsize+1)){
-		$indaux[$indnumber-1][$col]=$ind[$indnumber-1][$col];
-	}
-	@ind=@indaux;
+	## @{$indaux[-1]} = @{$ind[-1]};
+	## @ind = @indaux;
 
 	&sortarray();
 }
 
 # Crossover
 sub crossover {
-
 	my $pairs=0;
 	my $aux;
 	my $myrand=0;
@@ -410,7 +502,7 @@ sub crossover {
 			$first=(2*$count)-1+$addone;
 			$second=(2*$count)-2+$addone;
 			my $myrandpos=floor(rand()*($indsize));
-			print "\tCrossover between $first and $second at position $myrandpos\n";
+			print "\tCrossover between $first and $second at position $myrandpos\n" if $DEBUG_MODE;
 
 			# From position pos till the last data position (scalar-3) swap values
 			for my $pos ($myrandpos..($indsize-1)) {
@@ -420,28 +512,30 @@ sub crossover {
 			}
 		}
 	}
-	print "\n";
+	print "\n" if $DEBUG_MODE;
 }
 
 # Mutation
 sub mutation {
-
-	my $myrand;
-
-	# For each subject...
-	for my $row (0..scalar(@ind)-1){
-		# For each column...
+	for my $subject (0..scalar(@ind)-1){
 		for my $col (0..($indsize-1)){
-			$myrand=rand();
-			if ( $myrand <= $mutationprob ) {
-				print "\tMutation in individual $row at position $col\n";
-				$ind[$row][$col]=(($ind[$row][$col] + 1) & 1);
+			if ( rand() <= $mutationprob ) {
+				print "\tMutation in individual $subject at position $col\n" if $DEBUG_MODE;
+				#$ind[$subject][$col]=(($ind[$subject][$col] + 1) & 1);
+				$ind[$subject][$col] ^= 1;
 			}
 		}
 	}
-	print "\n";
+	print "\n"  if $DEBUG_MODE;
 }
 
+sub indAsBitNum {
+	use Math::BigInt;
+	my $str = join('', @_[0..$indsize-1]);
+	##print "[$str]\n";
+	my $b = Math::BigInt->new('0b' . $str);
+	return $b;
+}
 
 # Cross Validation
 sub crossvalidation {
@@ -455,13 +549,14 @@ sub crossvalidation {
 	my $rights=0;
 	
 	# The Chosen One
-	print "I$iteration\tBest sol:";
+	print "I$iteration\tBest sol:\t";
 	for my $col (0..($indsize-1)){
 		printf "%s", $ind[-1][$col];
-        }
+	}
+	printf " [%s]", &indAsBitNum(@{$ind[-1]});
 
 	# Calculating the sum of the columns of the best individual, ie., number of technical indicators chosen
-	$chosenindnum=usedindnum(-1);
+	$chosenindnum = usedindnum(-1);
 	print "\t# ind: $chosenindnum/$indsize";
 
 	# Counts how many results are reproduced by the best individual
@@ -490,12 +585,12 @@ print ">>> Input file loaded\n";
 
 &holdout;
 print ">>> Holdout executed\n\n";
+&printgaconditions;
+
 #print ">>> Training data\n";
 #&printarray(@training);
 #print ">>> Validation data\n";
 #&printarray(@crossresults);
-
-&printgaconditions;
 
 print ">>> Performance of each indicator if used separately\n";
 &indicatorstest;
