@@ -1,5 +1,14 @@
 #!/usr/bin/perl
 
+use strict;
+use Time::HiRes qw( time );
+use POSIX qw/ceil floor/;
+use threads;
+use threads::shared;
+use Thread qw(async);
+use List::Util qw[min max sum];
+use Math::BigInt;
+
 my $start;
 $start = time();
 
@@ -8,13 +17,13 @@ print "GA - START\n";
 # Parameters
 my $iterationnumber=150;		# number of iterations
 my $crossoverprob=0.3;			# crossover probability
-my $mutationprob=0.005;			# mutation probability
+my $mutationprob=0.01;			# mutation probability
 my $fitnesspow=2;			# pow value for fitness formula
 my $indnumber=25;			# number of individuals (solutions)
-my $holdoutval=0.02;			# percentage of inputs that will be used for cross validation
+my $holdoutval=0.1;			# percentage of inputs that will be used for cross validation
 my $infile="./input.txt";		# indicators results input file
 my $avgenvelope=0.3333;			# prediction_avg envelope
-my $initconst=0.25;			# initialize: chance of bit=1
+my $initconst=0.15;			# initialize: chance of bit=1
 
 # Variables
 my $linecount=-1;
@@ -33,12 +42,12 @@ my @fields;
 my @crossresults;
 my @crossval;
 my @loadedresults;
+my $MAX_THREADS = 4;
+my $DEBUG_MODE = 0;
 
-use Time::HiRes qw( time );
-use POSIX qw/ceil/;
-use POSIX qw/floor/;
-use strict;
-
+my $idxFitness;
+my $idxFitnessAdj;
+my $idxUsedind;
 
 #system(clear);
 
@@ -83,7 +92,7 @@ sub printgaconditions {
 
 sub printholdoutconditions {
 	print "Training data set size:\t\t$trainingsize\n";
-        print "Cross validation data set size:\t$crossresultssize\n";
+		print "Cross validation data set size:\t$crossresultssize\n";
 }
 
 # populates a matrix with the indicator results calculated in the spreadsheet
@@ -92,12 +101,11 @@ sub popresults {
 
 	open(INFILE,$infile) or die("Cant open file:$!");
 	while (<INFILE>){
-	        $line=$_;
+		my $line=$_;
 		chomp($line);
 		@fields = split ',', $line;
-
 		$linecount=$linecount+1;
-	        for my $colcount (0..scalar(@fields)-1){
+			for my $colcount (0..scalar(@fields)-1){
 			$loadedresults[$linecount][$colcount] = @fields[$colcount];
 		}
 	}
@@ -106,31 +114,32 @@ sub popresults {
 	# Defining individual size based on input file
 	$indsize = scalar(@fields)-1;
 
+	$idxFitness    = $indsize;
+	$idxFitnessAdj = $indsize+1;
+	$idxUsedind    = $indsize+2;
+
 	# Defining loaded results size
 	$loadedresultssize = scalar(@loadedresults);
 }
 
 # Holdout method to divide the loadedresults matrix in two parts
 sub holdout {
-	my $myrand=0.0;
 	my $trainingrow=0;
 	my $crossvalrow=0;
 	@training = ();
 	@crossresults = ();
 	for my $row (0..scalar(@loadedresults)-1){
-		$myrand=rand();
-		if ( $myrand gt $holdoutval ){
+		if ( rand() > $holdoutval ){
 			$training[$trainingrow]=$loadedresults[$row];
 			$trainingrow=$trainingrow+1;
 		}
 	}
 	for my $row (0..scalar(@loadedresults)-1){
-                $myrand=rand();
-                if ( $myrand gt $holdoutval ){
+		if ( rand() > $holdoutval ){
 			$crossresults[$crossvalrow]=$loadedresults[$row];
 			$crossvalrow=$crossvalrow+1;
-                }
-        }
+		}
+	}
 	# Defining training data set size
 	$trainingsize = scalar(@training);
 	# Defining cross validation data set size
@@ -154,14 +163,14 @@ sub indicatorstest {
 		for my $trainingrow (0..($trainingsize-1)){
 			# Compare if it predicted correctly
 			if ( $training[$trainingrow][-1] == $training[$trainingrow][$indicator] ){
-				$trainingrights=$trainingrights+1;
+				$trainingrights++;
 			}
 		}
 		# For each cross validation data set row...
 		for my $crossrow (0..($crossresultssize-1)){
 			# Compare if it predicted correctly
 			if ( $crossresults[$crossrow][-1] == $crossresults[$crossrow][$indicator] ){
-				$crossrights=$crossrights+1;
+				$crossrights++;
 			}
 		}
 		$trainingratio = $trainingrights / $trainingsize;
@@ -182,17 +191,17 @@ sub printarray {
 	for my $indn (0..scalar(@array)-1){
 		$sum=0.0;
 		print "\tLine\t$indn:\t";
-		for my $column (0..scalar(@{$array[0]})-1){
-			if ( $column >= $indsize ) {
-				print "  | ";
-			}
-			printf "%3.9s",$array[$indn][$column] ;
+#		for my $column (0..scalar(@{$array[0]})-1){
+		for my $column (0..$indsize-1){
+			printf "%s",$array[$indn][$column];
 		}
+		printf " | %5s", $array[$indn][$idxFitness];
+		printf " | %5s", $array[$indn][$idxFitnessAdj];
+		printf " | %2s", $array[$indn][$idxUsedind];
 		print "\n";
 	}
 	print "\n";
 }
-
 # Initialize subjects
 sub initialize {
 	print ">>> Initializing individuals\n";
@@ -212,8 +221,9 @@ sub initialize {
 			}
 			$ind[$indn][$column]=$value;
 		}
-		$ind[$indn][$indsize]=0.00;
+		$ind[$indn][$idxFitness]=0.00;
 		$ind[$indn][$indsize+1]=0.00;
+		$ind[$indn][$indsize+2]=0.00;
 
 		$const = 1 - $const;
 	}
@@ -229,17 +239,18 @@ sub fitnessadj {
 
 	# Getting the max of fitness column
 	for my $row (0..scalar(@ind)-1){
-		$fitnessval=$ind[$row][$indsize];
+		$fitnessval=$ind[$row][$idxFitness];
 		if ( $max < $fitnessval ) {
 			$max=$fitnessval;
 		}
 	}
 	# abs of diff between fitness and its max
 	for my $row (0..scalar(@ind)-1){
-		$diffabs=abs($ind[$row][$indsize]-$max);
-		$ind[$row][($indsize+1)]=$diffabs ** $fitnesspow;;
+		$diffabs = abs($ind[$row][$idxFitness]-$max);
+		$ind[$row][$idxFitnessAdj] = $diffabs ** $fitnesspow;;
+		$ind[$row][$idxUsedind] = usedindnum($row);
 		# Getting the sum of (fitness - max)^fitnesspow
-		$diffsum=$diffsum+$ind[$row][($indsize+1)];
+		$diffsum += $ind[$row][$idxFitnessAdj];
 	}
 
 	return $diffsum;
@@ -248,11 +259,7 @@ sub fitnessadj {
 # Returns number of used indicators by individual which row is passed as first parameter
 sub usedindnum {
 	my $indrow = $_[0];
-	my $numusedind = 0;
-	for my $col (0..($indsize-1)){
-                $numusedind = $numusedind + $ind[$indrow][$col];
-        }
-	return $numusedind;
+	return sum(@{$ind[$indrow]}[0..$indsize-1]);
 }
 
 # Prediction function for a given indicator and result row. AVG method.
@@ -270,7 +277,7 @@ sub prediction_avg {
 
 	# Sum of used indicators results
 	for my $col (0..($indsize-1)){
-		$sum=$sum + ( $ind[$indrow][$col] * $array->[$arrayrow][$col] );
+		$sum += ( $ind[$indrow][$col] * $array->[$arrayrow][$col] );
 	}
 	$usedind = usedindnum($indrow);
 	if ( $usedind == 0 ) {
@@ -279,7 +286,8 @@ sub prediction_avg {
 		$avg = $sum / $usedind;
 
 		# Mutable envelope
-		$avgenvelope = 1 / $usedind;
+		# $avgenvelope = 1 / $usedind;
+		$avgenvelope = ceil($usedind / 2.0) / $usedind;
 
 		if (( $avg >= $avgenvelope ) and ( $avg <= 1 )) {
 			$pred = 1;
@@ -294,94 +302,128 @@ sub prediction_avg {
 	return $pred;
 }
 
-# Fitness function AVG method
-sub calcfitness_avg {
-
-	my $sum;
-	my $error;
-	my $max;
+sub theFitness_avg {
+	my $subject = shift;
+	my $sum = 0.00;
 	my $myprediction;
+	my $error;
+
+	# For each training row...
+	for my $trow (0..(scalar(@training)-1)){
+		# Calculate absolute error actual result and prediction
+		$myprediction = prediction_avg(\@training, $trow, $subject);
+		if ( $myprediction == 2 ) {
+			# If prediction == 2 (that happens when no indicators are selected)
+			# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
+			##$sum = $trainingsize * 2;
+			$sum = 999999;
+			last;
+		} else {
+			$error = ($training[$trow][-1] != $myprediction);
+			#$error = $training[$trow][-1] - $myprediction;
+			$sum += abs($error);
+			#$sum = $sum * $sum; # Should I use this one?
+		}
+	}
+	return $sum;
+}
+
+sub calcfitness_avg1 {
+	my $sum;
 
 	# For each subject...
 	for my $subject (0..scalar(@ind)-1){
-		$sum=0.00;
-		# For each training row...
-		for my $trow (0..(scalar(@training)-1)){
-			# Calculate absolute error actual result and prediction
-			$myprediction = prediction_avg(\@training,$trow,$subject);
-			if ( $myprediction == 2 ) {
-				# If prediction == 2 (that happens when no indicators are selected)
-				# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
-				$sum = $trainingsize * 2;
-				last;
-			} else {
-				$error = $training[$trow][-1] - $myprediction;
-				$sum = $sum + abs($error);
-	#			$sum = $sum * $sum; # Should I use this one?
-			}
-		}
-		$ind[$subject][$indsize] = $sum;
+		$sum = theFitness_avg($subject);
+		$ind[$subject][$idxFitness] = $sum;
 	}
-	$max=&fitnessadj;
 
+	my $max = &fitnessadj;
 	&sortarray();
 
 	return $max;
 }
 
+# Fitness function AVG method
+sub calcfitness_avg {
+	my $error;
+	my $max;
+	my $myprediction;
+
+	# For each subject...
+	##	for my $row (0..scalar(@ind)-1){
+	my $limit = scalar(@ind)-1;
+	my $chunk = min($limit, 1 + int($limit / $MAX_THREADS));
+	my $first = 0;
+	my @threadList = ();
+
+	my %theFit :shared;
+	%theFit = {};
+
+	while ($first < $limit) {
+		my $last = min($first + $chunk, $limit);
+		my $thd = async {
+			for my $subject ($first..$last) {
+				my $sum = theFitness_avg($subject);
+				{ lock(%theFit); $theFit{$subject} = $sum; }
+			}
+		};
+		push(@threadList, $thd);
+		$first = $last
+	}
+	map { $_->join(); } @threadList;
+	for my $subject (0..$limit){
+		unless (exists($theFit{$subject})) {
+			print "\t-> INVALID: $subject\n";
+			next;
+		}
+		$ind[$subject][$idxFitness] = $theFit{$subject};
+	}
+	$max = &fitnessadj;
+	&sortarray();
+	return $max;
+}
+
 #Sort ind array by its last field (adjusted fitness)
 sub sortarray {
-
 	my @array = sort cmpfunc @ind;
 	@ind=@array;
-
 }
 sub cmpfunc {
-	my $size;
-	$size=scalar(@{$ind[0]})-1;
-	return (($a->[$size] <=> $b->[$size]) or 
-		($a->[$size-1] <=> $b->[$size-1]));
+	# my $size;
+	# $size=scalar(@{$ind[0]})-1;
+	return (($a->[$idxFitnessAdj] <=> $b->[$idxFitnessAdj]) or
+			($b->[$idxUsedind] <=> $a->[$idxUsedind]));
 }
+
 
 # Select new population
 sub selection {
-
 	my $max=$_[0];
-	my $sum;
 	my $curfitadj = 0;
-	my @indaux;
+	my @indaux = ();
 
 	# loop ($indnumber-2) times to get (same number - 1) subjects for next generation
 	for my $count (0..$indnumber-2){
-		my $myrand=rand() * $max;
-
-		$sum=0;
+		my $myrand = rand() * $max;
+		my $sum = 0;
 		# for each subject...
 		for my $subject (0..$indnumber-1){
-			$curfitadj = $ind[$subject][($indsize+1)];
+			$curfitadj = $ind[$subject][$idxFitnessAdj];
 			if ( ($myrand >= $sum ) and ($myrand <= ($curfitadj + $sum) ) ) {
-				for my $col (0..($indsize+1)){
-					$indaux[$count][$col]=$ind[$subject][$col];
-				}
-				# If found, skip the rest of the loop
-				last;
+				@{$indaux[$count]} = @{$ind[$subject]};
+				last;  # If found, skip the rest of the loop
 			}
-			$sum=$sum+$curfitadj;
+			$sum += $curfitadj;
 		}
 	}
-
 	# Best individual goes automatically to new population
-	for my $col (0..($indsize+1)){
-		$indaux[$indnumber-1][$col]=$ind[$indnumber-1][$col];
-	}
-	@ind=@indaux;
-
+	@{$indaux[$indnumber-1]} = @{$ind[$indnumber-1]};
+	@ind = @indaux;
 	&sortarray();
 }
 
 # Crossover
 sub crossover {
-
 	my $pairs=0;
 	my $aux;
 	my $myrand=0;
@@ -410,7 +452,7 @@ sub crossover {
 			$first=(2*$count)-1+$addone;
 			$second=(2*$count)-2+$addone;
 			my $myrandpos=floor(rand()*($indsize));
-			print "\tCrossover between $first and $second at position $myrandpos\n";
+			print "\tCrossover between $first and $second at position $myrandpos\n" if $DEBUG_MODE;
 
 			# From position pos till the last data position (scalar-3) swap values
 			for my $pos ($myrandpos..($indsize-1)) {
@@ -420,28 +462,29 @@ sub crossover {
 			}
 		}
 	}
-	print "\n";
+	print "\n" if $DEBUG_MODE;
 }
 
 # Mutation
 sub mutation {
-
-	my $myrand;
-
-	# For each subject...
-	for my $row (0..scalar(@ind)-1){
-		# For each column...
+	for my $subject (0..scalar(@ind)-1){
 		for my $col (0..($indsize-1)){
-			$myrand=rand();
-			if ( $myrand <= $mutationprob ) {
-				print "\tMutation in individual $row at position $col\n";
-				$ind[$row][$col]=(($ind[$row][$col] + 1) & 1);
+			if ( rand() <= $mutationprob ) {
+				print "\tMutation in individual $subject at position $col\n" if $DEBUG_MODE;
+				#$ind[$subject][$col]=(($ind[$subject][$col] + 1) & 1);
+				$ind[$subject][$col] ^= 1;
 			}
 		}
 	}
-	print "\n";
+	print "\n"  if $DEBUG_MODE;
 }
 
+sub indAsBitNum {
+	my $str = join('', @_[0..$indsize-1]);
+	##print "[$str]\n";
+	my $b = Math::BigInt->new('0b' . $str);
+	return $b;
+}
 
 # Cross Validation
 sub crossvalidation {
@@ -455,27 +498,54 @@ sub crossvalidation {
 	my $rights=0;
 	
 	# The Chosen One
-	print "I$iteration\tBest sol:";
+	print "I$iteration\tBest sol:\t";
 	for my $col (0..($indsize-1)){
 		printf "%s", $ind[-1][$col];
-        }
+	}
+	printf " [%s]", &indAsBitNum(@{$ind[-1]});
 
 	# Calculating the sum of the columns of the best individual, ie., number of technical indicators chosen
-	$chosenindnum=usedindnum(-1);
-	print "\t# ind: $chosenindnum/$indsize";
+	$chosenindnum = usedindnum(-1);
+	printf "\t# ind: %2d/%2d",$chosenindnum,$indsize;
+
+	# Calculating the sum of the columns of the best individual, ie., number of technical indicators chosen
+	my %cardinal = ();
+	for my $subject (0..$indnumber-1){
+		my @arSubject = @{$ind[$subject]};
+		my $indAsNumber = &indAsBitNum(@arSubject);
+		$cardinal{$indAsNumber}++;
+	}
+	printf "\t# dist subj: %2d/%2d",scalar keys %cardinal, $indnumber;
 
 	# Counts how many results are reproduced by the best individual
 	# For each cross results record
+
 	for my $crow (0..($crossresultssize-1)) {
 		$prediction = prediction_avg(\@crossresults,$crow,-1);
-		if ( $prediction == $crossresults[$crow][$indsize] ){
-			$rights = $rights + 1;
+		if ( $prediction == $crossresults[$crow][$idxFitness] ){
+			$rights++;
 		}
 	}
 
+	# for my $crow (0..($trainingsize-1)) {
+	# 	$prediction = prediction_avg(\@training, $crow, -1);
+	# 	if ( $prediction == $training[$crow][$idxFitness] ){
+	# 		$rights++;
+	# 	}
+	# }
+
+	# for my $crow (0..($loadedresultssize-1)) {
+	# 	$prediction = prediction_avg(\@loadedresults, $crow, -1);
+	# 	if ( $prediction == $loadedresults[$crow][$idxFitness] ){
+	# 		$rights++;
+	# 	}
+	# }
+
 	$crosspercentage = $rights / $crossresultssize;
+	# $crosspercentage = $rights / $loadedresultssize;
 	$crosspercentage = $crosspercentage * 100;
 	printf "\tCorrect $rights/$crossresultssize (or %.2f%)\n",$crosspercentage;
+	# printf "\tCorrect $rights/$loadedresultssize (or %.2f%)\n",$crosspercentage;
 	print "\n\n";
 }
 
@@ -490,12 +560,12 @@ print ">>> Input file loaded\n";
 
 &holdout;
 print ">>> Holdout executed\n\n";
+&printgaconditions;
+
 #print ">>> Training data\n";
 #&printarray(@training);
 #print ">>> Validation data\n";
 #&printarray(@crossresults);
-
-&printgaconditions;
 
 print ">>> Performance of each indicator if used separately\n";
 &indicatorstest;
@@ -559,6 +629,8 @@ printf("Elapsed time: %.2f\n", $end - $start);
 
 print "Exiting...\n";
 print "GA - END\n";
+
+warn sprintf "%s\n", &indAsBitNum(@{$ind[-1]});
 
 # The answer is 42
 
