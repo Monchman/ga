@@ -9,7 +9,7 @@ use threads::shared;
 use Thread qw(async);
 use List::Util qw[min max sum];
 #use Math::BigInt;
-#use Data::Dumper;
+use Data::Dumper;
 ################################################################################
 # Parameters
 ################################################################################
@@ -52,7 +52,7 @@ my @indINT;
 my $BRUTE_FORCE = 0;
 my $MAX_THREADS = 4;
 my $DEBUG_MODE = 0;
-my $MAX_SUBJECT_VALUE = (2 << 25) - 1; ## RESET AT INPUT FILE READING!!!
+my $MAX_SUBJECT_VALUE = 0; ## RESET AT INPUT FILE READING!!!
 
 ################################################################################
 ################################################################################
@@ -132,7 +132,8 @@ sub popresults {
 	close(INFILE);
 
 	# Defining individual size based on input file
-	$indsize       = $#fields;
+	$indsize = $#fields;
+	print "indsize -> {{$indsize}}\n";
 
 	# RELATIVE TO IND ARRAY!!!
 	# RESULT MUST SUM $indsize!!
@@ -144,7 +145,7 @@ sub popresults {
 	my $thePow = $#fields;
 	$MAX_SUBJECT_VALUE = (1 << $thePow);
 	$MAX_SUBJECT_VALUE--;
-	#print "{{$MAX_SUBJECT_VALUE}}",($MAX_SUBJECT_VALUE - 33554431),"\n\n";
+	print "{{$MAX_SUBJECT_VALUE}}",($MAX_SUBJECT_VALUE - 33554431),"\n\n";
 
 	# Defining loaded results size
 	$loadedresultssize = scalar(@loadedresults);
@@ -169,6 +170,11 @@ sub holdout {
 			@{$crossresults[$crossvalrow++]} = @{$loadedresults[$row]};
 		}
 	}
+
+	# ASSERT
+	@{$training[0]}     = @{$loadedresults[floor(rand() * $#loadedresults)]} unless $trainingrow;
+	@{$crossresults[0]} = @{$loadedresults[floor(rand() * $#loadedresults)]} unless $crossvalrow;
+
 	# Defining training data set size
 	$trainingsize = scalar(@training);
 	# Defining cross validation data set size
@@ -221,7 +227,7 @@ sub printarray {
 	my @array = @_;
 	for my $indn (0..$#array){
 		print "\tLine\t$indn:\t";
-		printf "%s", dec2bin($array[$indn]);
+		printf "%s", dec2bin($array[$indn][0]);
 		printf "|%5s", $array[$indn][$idxFitness];
 		printf "|%5s", $array[$indn][$idxFitnessAdj];
 		printf "|%2s", $array[$indn][$idxUsedind];
@@ -253,7 +259,7 @@ sub BRUTE_FORCE {
 		my $thd = async {
 			print "[$first, $chunk, $last]\n";
 			my $bestInd = 0;
-			my $bestIndNum = 25;
+			my $bestIndNum = $indsize+1;
 			my $bestFit = $trainingsize * $trainingsize;
 			for (my $subject = $first; $subject <= $last; $subject++) {
 				my $usedind = NumberOfSetBits($subject);
@@ -532,11 +538,14 @@ sub mutation {
 ################################################################################
 ################################################################################
 sub bin2dec {
-    return unpack("N", pack("B32", substr("0" x 32 . $_[0], -32)));
+	my $str = substr("0" x 32 . $_[0], -32);
+    return unpack("N", pack("B32", $str));
 }
 sub dec2bin {
-	my $str = unpack("B32", pack("N", $_[0]));
-	return substr $str, -25;
+	my $dec = $_[0];
+	my $str = unpack("B32", pack("N", $dec));
+	my $bin = substr $str, -$indsize;
+	return $bin;
 }
 sub NumberOfSetBits {
 	return (dec2bin($_[0]) =~ tr/1//);
@@ -596,10 +605,8 @@ sub crossvalidation {
 	# }
 
 	$crosspercentage = $rights / $crossresultssize;
-	# $crosspercentage = $rights / $loadedresultssize;
 	$crosspercentage = $crosspercentage * 100;
 	printf " # Correct $rights/$crossresultssize (or %.2f%)\n", $crosspercentage;
-	# printf "\tCorrect $rights/$loadedresultssize (or %.2f%)\n",$crosspercentage;
 	print "\n\n" if $DEBUG_MODE;
 }
 ################################################
@@ -684,7 +691,6 @@ printf("Elapsed time: %.2f\n", $end - $start)  if $DEBUG_MODE;
 print "Exiting...\n" if $DEBUG_MODE;
 print "GA - END\n" if $DEBUG_MODE;
 
-#warn sprintf "%s\n", &bin2dec(@{$ind[-1]});
 warn sprintf "%s\n", $indINT[-1][0];
 
 # The answer is 42
