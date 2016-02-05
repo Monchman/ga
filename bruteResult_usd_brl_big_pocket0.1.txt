@@ -1,0 +1,29 @@
+D:\Dropbox\Programas\ga-master>perl int_tga.pl
+>>> GA conditions
+Number of iterations ..........: 100
+Crossover probability .........: 0.5
+Mutation probability ..........: 0.01
+Holdout probability ...........: 0.8
+Fitness pow ...................: 1
+Population size ...............: 100
+Number of genes ...............: 25
+Input file ....................: ./usd_brl_big_pocket0.1.txt
+Total data set size ...........: 1594
+Training data set size ........: 1594
+Cross validation data set size : 267
+Avg envelope ..................: 0
+Init const ....................: 0.5
+
+
+>>> BRUTE FORCE <<<
+[1, 8388608, 8388609]
+[8388609, 8388608, 16777217]
+[16777217, 8388608, 25165825]
+[25165825, 8388608, 33554431]
+bestInd = 278528 [0000001000100000000000000] bestFit = 856; bestIndNum = 1
+bestInd = 16793600 [1000000000100000000000000] bestFit = 917; bestIndNum = 2
+bestInd = 25182720 [1100000000100001000000000] bestFit = 1085; bestIndNum = 3
+bestInd = 8404992 [0100000000100000000000000] bestFit = 936; bestIndNum = 2
+Elapsed time: 35063.18
+
+D:\Dropbox\Programas\ga-master>
