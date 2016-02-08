@@ -32,8 +32,6 @@ my $crossresultssize = 0;
 my $trainingsize = 0;
 my $loadedresultssize = 0;
 my $currentiteration = 1; # current iteration
-my $onethird = 1/3;
-my $minusonethird = -$onethird;
 my $avgenvelope = 0.0; # prediction_avg envelope
 
 my $idxFitness;
