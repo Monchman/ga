@@ -15,8 +15,8 @@ use Data::Dumper;
 ################################################################################
 my $iterationnumber 	= 100; 								# number of iterations
 my $crossoverprob 		= 0.5; 								# crossover probability
-my $mutationprob 		= 0.01; 							# mutation probability
-my $fitnesspow 			= 1.0; 								# pow value for fitness formula
+my $mutationprob 		= 0.02; 							# mutation probability
+my $fitnesspow 			= 2.0; 								# pow value for fitness formula
 my $indnumber 			= 100; 								# number of individuals (solutions)
 my $holdoutval 			= 0.8; 								# percentage of inputs that will be used for cross validation
 my $infile 				= "./usd_brl_big_pocket0.1.txt"; 	# indicators results input file
@@ -49,7 +49,7 @@ my @indINT;
 
 my $BRUTE_FORCE = 0;
 my $MAX_THREADS = 4;
-my $DEBUG_MODE = 0;
+my $DEBUG_MODE = 1;
 my $MAX_SUBJECT_VALUE = 0; ## RESET AT INPUT FILE READING!!!
 
 ################################################################################
@@ -95,9 +95,9 @@ sub printgaconditions {
 	print "Number of genes ...............: $indsize\n";
 	print "Input file ....................: $infile\n";
 	print "Total data set size ...........: $loadedresultssize\n";
-	print "Training data set size ........: $trainingsize\n";
-	print "Cross validation data set size : $crossresultssize\n";
-	print "Avg envelope ..................: $avgenvelope\n";
+#	print "Training data set size ........: $trainingsize\n";
+#	print "Cross validation data set size : $crossresultssize\n";
+#	print "Avg envelope ..................: $avgenvelope\n";
 	print "Init const ....................: $initconst\n";
 	print "\n";
 }
@@ -184,36 +184,50 @@ sub holdout {
 sub indicatorstest {
 	#return if $BRUTE_FORCE;
 	
-	my $crossrights = 0;
-	my $trainingrights = 0;
-	my $crossratio = 0;
-	my $trainingratio = 0;
+#	my $crossrights = 0;
+#	my $trainingrights = 0;
+	my $totalrights = 0;
+#	my $crossratio = 0;
+#	my $trainingratio = 0;
+	my $totalratio = 0;
 
 	print "Correct predictions per indicator\n" if $DEBUG_MODE;
-	print "Indicator\tTraining ($trainingsize)\t\tValidation ($crossresultssize)\n" if $DEBUG_MODE;
+	print "Indicator\tTotal ($loadedresultssize)\n" if $DEBUG_MODE;
+#	print "Indicator\tTraining ($trainingsize)\t\tValidation ($crossresultssize)\t\tTotal ($loadedresultssize)\n" if $DEBUG_MODE;
 	# For each indicator...
 	for my $indicator (0..($indsize-1)){
-		$crossrights = 0;
-		$trainingrights = 0;
+#		$crossrights = 0;
+#		$trainingrights = 0;
+		$totalrights = 0;
 		# For each training validation data set row...
-		for my $trainingrow (0..$#training){
-			# Compare if it predicted correctly
-			if ( $training[$trainingrow][$indsize] == $training[$trainingrow][$indicator] ){
-				$trainingrights++;
-			}
-		}
+#		for my $trainingrow (0..$#training){
+#			# Compare if it predicted correctly
+#			if ( $training[$trainingrow][$indsize] == $training[$trainingrow][$indicator] ){
+#				$trainingrights++;
+#			}
+#		}
 		# For each cross validation data set row...
-		for my $crossrow (0..$#crossresults){
+#		for my $crossrow (0..$#crossresults){
+#			# Compare if it predicted correctly
+#			if ( $crossresults[$crossrow][$indsize] == $crossresults[$crossrow][$indicator] ){
+#				$crossrights++;
+#			}
+#		}
+		# For each input data set row...
+		for my $row (0..$#loadedresults){
 			# Compare if it predicted correctly
-			if ( $crossresults[$crossrow][$indsize] == $crossresults[$crossrow][$indicator] ){
-				$crossrights++;
+			if ( $loadedresults[$row][$indsize] == $loadedresults[$row][$indicator] ){
+				$totalrights++;
 			}
 		}
-		$trainingratio = $trainingrights / $trainingsize;
-		$trainingratio = $trainingratio * 100;
-		$crossratio = $crossrights / $crossresultssize;
-		$crossratio = $crossratio * 100;
-		printf "\t$indicator\t$trainingrights\t%.2f%\t\t$crossrights\t%.2f%\n",$trainingratio,$crossratio if $DEBUG_MODE;
+#		$trainingratio = $trainingrights / $trainingsize;
+#		$trainingratio = $trainingratio * 100;
+#		$crossratio = $crossrights / $crossresultssize;
+#		$crossratio = $crossratio * 100;
+		$totalratio = $totalrights / $loadedresultssize;
+		$totalratio = $totalratio * 100;
+		printf "\t$indicator\t$totalrights\t%.2f%\n",$totalratio if $DEBUG_MODE;
+#		printf "\t$indicator\t$trainingrights\t%.2f%\t\t$crossrights\t%.2f%\t\t$totalrights\t%.2f%\n",$trainingratio,$crossratio,$totalratio if $DEBUG_MODE;
 	}
 	print "\n";
 }
@@ -409,8 +423,8 @@ sub calcfitness_avg {
 			for my $idxSubject ($first..$last) {
 				# If prediction == 2 (that happens when no indicators are selected)
 				# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
-				## $fitnessValue = $trainingsize ** 2;
-				$fitnessValue = 999999;
+				$fitnessValue = $trainingsize ** 2;
+				#$fitnessValue = 999999;
 				$subject = $indINT[$idxSubject][0];
 				if ($subject > 0) {
 					$usedind = NumberOfSetBits($subject);
