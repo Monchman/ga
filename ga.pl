@@ -18,7 +18,7 @@ my $crossoverprob 		= 0.5; 								# crossover probability
 my $mutationprob 		= 0.02; 							# mutation probability
 my $fitnesspow 			= 2.0; 								# pow value for fitness formula
 my $indnumber 			= 100; 								# number of individuals (solutions)
-my $holdoutval 			= 0.8; 								# percentage of inputs that will be used for cross validation
+my $holdoutval 			= 0.3333; 								# percentage of inputs that will be used for cross validation
 my $infile 				= "./usd_brl_big_pocket0.1.txt"; 	# indicators results input file
 my $initconst 			= 0.5; 								# initialize: chance of bit=1
 ################################################################################
@@ -32,7 +32,7 @@ my $crossresultssize = 0;
 my $trainingsize = 0;
 my $loadedresultssize = 0;
 my $currentiteration = 1; # current iteration
-my $avgenvelope = 0.0; # prediction_avg envelope
+my $avgenvelope = 0.5; # prediction_avg envelope
 
 my $idxFitness;
 my $idxFitnessAdj;
@@ -48,7 +48,7 @@ my @indINT;
 ################################################################################
 
 my $BRUTE_FORCE = 0;
-my $MAX_THREADS = 4;
+my $MAX_THREADS = 8;
 my $DEBUG_MODE = 1;
 my $MAX_SUBJECT_VALUE = 0; ## RESET AT INPUT FILE READING!!!
 
@@ -158,13 +158,18 @@ sub holdout {
 	my $trainingrow = 0;
 	my $crossvalrow = 0;
 
+	my $myrand = 0;
+
 	for my $row (0..$#loadedresults){
+		$myrand=rand();
 		#next unless $BRUTE_FORCE || $loadedresults[$row][$indsize];
-		if ($BRUTE_FORCE || rand() > $holdoutval){
+		if ($BRUTE_FORCE || $myrand > $holdoutval){
+#		if ($BRUTE_FORCE || rand() > $holdoutval){
 			@{$training[$trainingrow++]} = @{$loadedresults[$row]};
 		}
-		next unless $loadedresults[$row][$indsize];
-		if ( rand() > $holdoutval ){
+#		next unless $loadedresults[$row][$indsize];
+		if ( $myrand <= $holdoutval ){
+#		if ( rand() <= $holdoutval ){
 			@{$crossresults[$crossvalrow++]} = @{$loadedresults[$row]};
 		}
 	}
@@ -371,8 +376,11 @@ sub prediction_avg {
 	#print "$avg = $indSum / $usedind;\n";
 
 	# Mutable envelope
-	# my $avgenvelope = 1 / $usedind;
-	my $avgenvelope = ceil($usedind / 2.0) / $usedind;
+#	my $avgenvelope = 1 / $usedind;
+
+	# The 2 lines below are equivalent
+#	my $avgenvelope = ceil($usedind / 2.0) / $usedind;
+	my $avgenvelope = 0.5;
 	if (( $avg >= $avgenvelope ) and ( $avg <= 1 )) {
 		return 1;
 	} 
@@ -394,8 +402,8 @@ sub subjectFitness_avg {
 
 	# For each training row...
 	for my $trow (0..$#training){
-		next unless $training[$trow][$indsize];
-		# Calculate absolute error actual result and prediction
+#		next unless $training[$trow][$indsize];
+		# Adds 1 if observed tendency is different than prediction
 		$myprediction = prediction_avg($training[$trow], \@arSubject, $usedind);
 		$fitnessValue += ($training[$trow][$indsize] != $myprediction);
 	}
@@ -423,7 +431,8 @@ sub calcfitness_avg {
 			for my $idxSubject ($first..$last) {
 				# If prediction == 2 (that happens when no indicators are selected)
 				# assign worst score possible. "* 2" because diff between 1 and -1 is 2.
-				$fitnessValue = $trainingsize ** 2;
+#				$fitnessValue = $trainingsize ** 2;
+				$fitnessValue = $trainingsize;
 				#$fitnessValue = 999999;
 				$subject = $indINT[$idxSubject][0];
 				if ($subject > 0) {
